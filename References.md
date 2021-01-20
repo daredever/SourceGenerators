@@ -10,3 +10,4 @@
 - https://www.infoq.com/news/2020/06/CSharp-9-Partial-Methods/
 - https://www.cazzulino.com/module-initializers.html
 - https://khalidabuhakmeh.com/module-initializers-in-csharp-9
+- https://gist.github.com/TessenR/ab40df2d6e971a8d6e5c6c6295d85d11
