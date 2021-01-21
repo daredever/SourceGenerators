@@ -7,7 +7,6 @@
 - https://devblogs.microsoft.com/dotnet/introducing-c-source-generators/
 - https://blog.jetbrains.com/dotnet/2020/11/12/source-generators-in-net-5-with-resharper/
 
-
 C# code generators are a component you can write that is similar to a roslyn analyzer or code fix. 
 The difference is that code generators analyze code and write new source code files as part of the compilation process.
 A typical code generator searches code for attributes or other conventions.
@@ -37,18 +36,179 @@ From that information, it adds new code to the compilation.
 
 Source generators can only add code; they aren't allowed to modify any existing code in the compilation.
 
-The two features added for code generators are extensions to partial method syntax, and module initializers.
+## Examples
 
-## Partial methods
+- https://github.com/wieslawsoltes/Svg.Skia#svg-to-c-compiler
+- https://github.com/trampster/JsonSrcGen
+- https://github.com/devlooped/ThisAssembly
+- https://github.com/ufcpp/StringLiteralGenerator
+- https://devblogs.microsoft.com/dotnet/new-c-source-generator-samples/
 
-### Overview
+
+This section is broken down by user scenarios, with general solutions listed first, and more specific examples later on.
+
+### Generated class
+
+**User scenario:** As a generator author I want to be able to add a type to the compilation, that can be referenced by the user's code.
+
+**Solution:** Have the user write the code as if the type was already present. Generate the missing type based on information available in the compilation.
+
+**Example:**
+
+Given the following user code:
+
+```csharp
+public partial class UserClass
+{
+    public void UserMethod()
+    {
+        // call into a generated method
+        GeneratedNamespace.GeneratedClass.GeneratedMethod();
+    }
+}
+```
+
+Create a generator that will create the missing type when run:
+
+```csharp
+[Generator]
+public class CustomGenerator : ISourceGenerator
+{
+    public void Initialize(GeneratorInitializationContext context) {}
+
+    public void Execute(GeneratorExecutionContext context)
+    {
+        context.AddSource("myGeneratedFile.cs", SourceText.From(@"
+namespace GeneratedNamespace
+{
+    public class GeneratedClass
+    {
+        public static void GeneratedMethod()
+        {
+            // generated code
+        }
+    }
+}", Encoding.UTF8));
+    }
+}
+```
+
+### Additional file transformation
+
+**User scenario:** As a generator author I want to be able to transform an external non-C# file into an equivalent C# representation.
+
+**Solution:** Use the additional files property of the `GeneratorExecutionContext` to retrieve the contents of the file, convert it to the C# representation and return it.
+
+**Example:**
+
+```csharp
+[Generator]
+public class FileTransformGenerator : ISourceGenerator
+{
+    public void Initialize(GeneratorInitializationContext context) {}
+
+    public void Execute(GeneratorExecutionContext context)
+    {
+        // find anything that matches our files
+        var myFiles = context.AnalyzerOptions.AdditionalFiles.Where(at => at.Path.EndsWith(".xml"));
+        foreach (var file in myFiles)
+        {
+            var content = file.GetText(context.CancellationToken);
+
+            // do some transforms based on the file context
+            string output = MyXmlToCSharpCompiler.Compile(content);
+
+            var sourceText = SourceText.From(output, Encoding.UTF8);
+
+            context.AddSource($"{file.Name}generated.cs", sourceText);
+        }
+    }
+}
+```
+
+### Augment user code
+
+**User scenario:** As a generator author I want to be able to inspect and augment a user's code with new functionality.
+
+**Solution:** Require the user to make the class you want to augment be a `partial class`, and mark it with e.g. a unique attribute, or name.
+Register a `SyntaxReceiver` that looks for any classes marked for generation and records them. Retrieve the populated `SyntaxReceiver`
+during the generation phase and use the recorded information to generate a matching `partial class` that
+contains the additional functionality.
+
+**Example:**
+
+```csharp
+public partial class UserClass
+{
+    public void UserMethod()
+    {
+        // call into a generated method inside the class
+        this.GeneratedMethod();
+    }
+}
+```
+
+```csharp
+[Generator]
+public class AugmentingGenerator : ISourceGenerator
+{
+    public void Initialize(GeneratorInitializationContext context)
+    {
+        // Register a factory that can create our custom syntax receiver
+        context.RegisterForSyntaxNotifications(() => new MySyntaxReceiver());
+    }
+
+    public void Execute(GeneratorExecutionContext context)
+    {
+        // the generator infrastructure will create a receiver and populate it
+        // we can retrieve the populated instance via the context
+        MySyntaxReceiver syntaxReceiver = (MySyntaxReceiver)context.SyntaxReceiver;
+
+        // get the recorded user class
+        ClassDeclarationSyntax userClass = syntaxReceiver.ClassToAugment;
+        if (userClass is null)
+        {
+            // if we didn't find the user class, there is nothing to do
+            return;
+        }
+
+        // add the generated implementation to the compilation
+        SourceText sourceText = SourceText.From($@"
+public partial class {userClass.Identifier}
+{{
+    private void GeneratedMethod()
+    {{
+        // generated code
+    }}
+}}", Encoding.UTF8);
+        context.AddSource("UserClass.Generated.cs", sourceText);
+    }
+
+    class MySyntaxReceiver : ISyntaxReceiver
+    {
+        public ClassDeclarationSyntax ClassToAugment { get; private set; }
+
+        public void OnVisitSyntaxNode(SyntaxNode syntaxNode)
+        {
+            // Business logic to decide what we're interested in goes here
+            if (syntaxNode is ClassDeclarationSyntax cds &&
+                cds.Identifier.ValueText == "UserClass")
+            {
+                ClassToAugment = cds;
+            }
+        }
+    }
+}
+```
+
+### Partial methods
 
 - https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/classes-and-structs/partial-classes-and-methods
 - https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/extending-partial-methods
 - https://www.infoq.com/news/2020/06/CSharp-9-Partial-Methods/
 
 
-First, the changes to partial methods. Before C# 9.0, partial methods are private but can't specify an access modifier,
+There are some changes to partial methods. Before C# 9.0, partial methods are private but can't specify an access modifier,
 have a void return, and can't have out parameters. These restrictions meant that if no method implementation is provided,
 the compiler removes all calls to the partial method. C# 9.0 removes these restrictions,
 but requires that partial method declarations have an implementation.
@@ -56,7 +216,6 @@ Code generators can provide that implementation. To avoid introducing a breaking
 the compiler considers any partial method without an access modifier to follow the old rules.
 If the partial method includes the private access modifier, the new rules govern that partial method.
 
-### Examples
 
 ```c#
 // тут пример генератора для partial method
@@ -73,111 +232,257 @@ public class MyGenerator : ISourceGenerator
 }
 ```
 
-## Module initializers
+### Issue Diagnostics
 
-### Overview
+**User Scenario:** As a generator author I want to be able to add diagnostics to the users compilation.
 
-- https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/module-initializers
-- https://docs.microsoft.com/en-us/dotnet/api/system.runtime.compilerservices.moduleinitializerattribute?view=net-5.0
+**Solution:** Diagnostics can be added to the compilation via `GeneratorExecutionContext.ReportDiagnostic()`. These can be in response to the content of the users compilation:
+for instance if the generator is expecting a well formed `AdditionalFile` but can not parse it, the generator could emit a warning notifying the user that generation can not proceed.
 
-The second new feature for code generators is module initializers.
+For code-based issues, the generator author should also consider implementing a [diagnostic analyzer](https://docs.microsoft.com/en-us/visualstudio/code-quality/roslyn-analyzers-overview?view=vs-2019) that identifies the problem, and offers a code-fix to resolve it.
 
-Although the .NET platform has a feature that directly supports writing initialization code for the assembly (technically, the module), 
-it is not exposed in C#. This is a rather niche scenario, but once you run into it the solutions appear to be pretty painful. 
-There are reports of a number of customers (inside and outside Microsoft) struggling with the problem, and there are no doubt more undocumented cases.
+**Example:**
 
-Motivation
-- Enable libraries to do eager, one-time initialization when loaded, with minimal overhead and without the 
-  user needing to explicitly call anything
-- One particular pain point of current static constructor approaches is that the runtime must do additional 
-  checks on usage of a type with a static constructor, in order to decide whether the static constructor needs 
-  to be run or not. This adds measurable overhead.
-- Enable source generators to run some global initialization logic without the user needing to explicitly call anything
-
-Module initializers are methods that have the ModuleInitializerAttribute attribute attached to them.
-These methods will be called by the runtime before any other field access or method invocation within the entire module.
-
-A module initializer method:
-
-- Must be static
-- Must be parameterless
-- Must return void
-- Must not be a generic method
-- Must not be contained in a generic class
-- Must be accessible from the containing module
-
-That last bullet point effectively means the method and its containing class must be internal or public. The method can't be a local function.
-
-### Examples
-
-- https://www.cazzulino.com/module-initializers.html
-- https://github.com/wieslawsoltes/Svg.Skia#svg-to-c-compiler
-- https://github.com/trampster/JsonSrcGen
-- https://github.com/devlooped/ThisAssembly
-- https://github.com/ufcpp/StringLiteralGenerator
-- https://devblogs.microsoft.com/dotnet/new-c-source-generator-samples/
-- https://khalidabuhakmeh.com/module-initializers-in-csharp-9
-
-Sync code:
-```c#
-using System;
-using System.Runtime.CompilerServices;
-using System.Threading;
-using System.Threading.Tasks;
-
-namespace Preview
+```csharp
+[Generator]
+public class MyXmlGenerator : ISourceGenerator
 {
-    class Program
+
+    private static readonly DiagnosticDescriptor InvalidXmlWarning = new DiagnosticDescriptor(id: "MYXMLGEN001",
+                                                                                              title: "Couldn't parse XML file",
+                                                                                              messageFormat: "Couldn't parse XML file '{0}'.",
+                                                                                              category: "MyXmlGenerator",
+                                                                                              DiagnosticSeverity.Warning,
+                                                                                              isEnabledByDefault: true);
+
+    public void Execute(GeneratorExecutionContext context)
     {
-        static void Main(string[] args)
+        // Using the context, get any additional files that end in .xml
+        IEnumerable<AdditionalText> xmlFiles = context.AdditionalFiles.Where(at => at.Path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase));
+        foreach (AdditionalText xmlFile in xmlFiles)
         {
-            Console.WriteLine(Name);
-        }
+            XmlDocument xmlDoc = new XmlDocument();
+            string text = xmlFile.GetText(context.CancellationToken).ToString();
+            try
+            {
+                xmlDoc.LoadXml(text);
+            }
+            catch (XmlException)
+            {
+                // issue warning MYXMLGEN001: Couldn't parse XML file '<path>'
+                context.ReportDiagnostic(Diagnostic.Create(InvalidXmlWarning, Location.None, xmlFile.Path));
+                continue;
+            }
 
-        public static string Name;
-
-        [ModuleInitializer]
-        public static void Init()
-        {
-            Name = "Khalid";
+            // continue generation...
         }
+    }
+
+    public void Initialize(GeneratorInitializationContext context)
+    {
     }
 }
 ```
 
-Async code:
+### INotifyPropertyChanged
 
-```c#
-using System;
-using System.Runtime.CompilerServices;
-using System.Threading;
-using System.Threading.Tasks;
+**User scenario:** As a generator author I want to be able to implement the `INotifyPropertyChanged` pattern automatically for a user.
 
-namespace Preview
+**Solution:** The design tenant 'Explicitly additive only' seems to be at direct odds with the ability to implement this, and appears to call for user code modification.
+However we can instead take advantage of explicit fields and instead of *editing* the users properties, directly provide them for listed fields.
+
+**Example:**
+
+Given a user class such as:
+
+```csharp
+using AutoNotify;
+
+public partial class UserClass
 {
-    class Program
+    [AutoNotify]
+    private bool _boolProp;
+
+    [AutoNotify(PropertyName = "Count")]
+    private int _intProp;
+}
+```
+
+A generator could produce the following:
+
+```csharp
+using System;
+using System.ComponentModel;
+
+namespace AutoNotify
+{
+    [AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = false)]
+    sealed class AutoNotifyAttribute : Attribute
     {
-        static void Main(string[] args)
+        public AutoNotifyAttribute()
         {
-            Console.WriteLine(Name);
         }
+        public string PropertyName { get; set; }
+    }
+}
 
-        public static string Name;
 
-        [ModuleInitializer]
-        public static async void Init()
+public partial class UserClass : INotifyPropertyChanged
+{
+    public bool BoolProp
+    {
+        get => _boolProp;
+        set
         {
-            Name = await GetName();
+            _boolProp = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("UserBool"));
         }
+    }
 
-        public static Task<string> GetName()
-            => Task.FromResult("Khalid From Task!");
+    public int Count
+    {
+        get => _intProp;
+        set
+        {
+            _intProp = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Count"));
+        }
+    }
+
+    public event PropertyChangedEventHandler PropertyChanged;
+}
+
+```
+
+## Debugging
+
+how to debug
+
+## Unit Testing of Generators
+
+**User scenario**: As a generator author, I want to be able to unit test my generators to make development easier and ensure correctness.
+
+**Solution**: A user can host the `GeneratorDriver` directly within a unit test, making the generator portion of the code relatively simple to unit test. A user will need to provide a compilation for the generator to operate on, and can then probe either the resulting compilation, or the `GeneratorDriverRunResult` of the driver to see the individual items added by the generator.
+
+Starting with a basic generator that adds a single source file:
+
+```csharp
+[Generator]
+public class CustomGenerator : ISourceGenerator
+{
+    public void Initialize(GeneratorInitializationContext context) {}
+
+    public void Execute(GeneratorExecutionContext context)
+    {
+        context.AddSource("myGeneratedFile.cs", SourceText.From(@"
+namespace GeneratedNamespace
+{
+    public class GeneratedClass
+    {
+        public static void GeneratedMethod()
+        {
+            // generated code
+        }
+    }
+}", Encoding.UTF8));
     }
 }
 ```
 
-### Possible security and other problems
+As a user, we can host it in a unit test like so:
+
+```csharp
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Diagnostics;
+using System.Linq;
+using System.Reflection;
+
+namespace GeneratorTests.Tests
+{
+    [TestClass]
+    public class GeneratorTests
+    {
+        [TestMethod]
+        public void SimpleGeneratorTest()
+        {
+            // Create the 'input' compilation that the generator will act on
+            Compilation inputCompilation = CreateCompilation(@"
+namespace MyCode
+{
+    public class Program
+    {
+        public static void Main(string[] args)
+        {
+        }
+    }
+}
+");
+
+            // directly create an instance of the generator
+            // (Note: in the compiler this is loaded from an assembly, and created via reflection at runtime)
+            CustomGenerator generator = new CustomGenerator();
+
+            // Create the driver that will control the generation, passing in our generator
+            GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
+
+            // Run the generation pass
+            // (Note: the generator driver itself is immutable, and all calls return an updated version of the driver that you should use for subsequent calls)
+            driver = driver.RunGeneratorsAndUpdateCompilation(inputCompilation, out var outputCompilation, out var diagnostics);
+
+            // We can now assert things about the resulting compilation:
+            Debug.Assert(diagnostics.IsEmpty); // there were no diagnostics created by the generators
+            Debug.Assert(outputCompilation.SyntaxTrees.Count() == 2); // we have two syntax trees, the original 'user' provided one, and the one added by the generator
+            Debug.Assert(outputCompilation.GetDiagnostics().IsEmpty); // verify the compilation with the added source has no diagnostics
+
+            // Or we can look at the results directly:
+            GeneratorDriverRunResult runResult = driver.GetRunResult();
+
+            // The runResult contains the combined results of all generators passed to the driver
+            Debug.Assert(runResult.GeneratedTrees.Length == 1);
+            Debug.Assert(runResult.Diagnostics.IsEmpty);
+
+            // Or you can access the individual results on a by-generator basis
+            GeneratorRunResult generatorResult = runResult.Results[0];
+            Debug.Assert(generatorResult.Generator == generator);
+            Debug.Assert(generatorResult.Diagnostics.IsEmpty);
+            Debug.Assert(generatorResult.GeneratedSources.Length == 1);
+            Debug.Assert(generatorResult.Exception is null);
+        }
+
+        private static Compilation CreateCompilation(string source)
+            => CSharpCompilation.Create("compilation",
+                new[] { CSharpSyntaxTree.ParseText(source) },
+                new[] { MetadataReference.CreateFromFile(typeof(Binder).GetTypeInfo().Assembly.Location) },
+                new CSharpCompilationOptions(OutputKind.ConsoleApplication));
+    }
+}
+```
+
+Note: the above example uses MSTest, but the contents of the test are easily adapted to other frameworks, such as XUnit.
+
+## Package a generator as a NuGet package
+
+**User scenario**: As a generator author I want to package my generator as a NuGet package for consumption.
+
+**Solution:** Generators can be packaged using the same method as an Analyzer would.
+Ensure the generator is placed in the `analyzers\dotnet\cs` folder of the package for it to be automatically added to the users project on install.
+
+For example, to turn your generator project into a NuGet package at build, add the following to your project file:
+
+```xml
+  <PropertyGroup>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild> <!-- Generates a package at build -->
+    <IncludeBuildOutput>false</IncludeBuildOutput> <!-- Do not include the generator as a lib dependency -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Package the generator in the analyzer directory of the nuget package -->
+    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+```
+
+## Possible security and other problems
 
 - "Perhaps the existing third-party tooling for “injecting” module initializers is sufficient for users who have been asking for this feature."
-- "A note for folks doing async initialization, remember to create CancellationToken instances so that apps don’t hang at startup indefinitely. 
-  A network is a volatile place, and developers should program accordingly."
