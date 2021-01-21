@@ -356,6 +356,10 @@ public partial class UserClass : INotifyPropertyChanged
 
 ## Debugging
 
+- https://nicksnettravels.builttoroam.com/debug-code-gen/
+- https://dominikjeske.github.io/source-generators/
+- https://www.cazzulino.com/source-generators.html
+
 how to debug
 
 ## Unit Testing of Generators
