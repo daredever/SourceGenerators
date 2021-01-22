@@ -28,6 +28,22 @@ public class MyGenerator : ISourceGenerator
 }
 ```
 
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <LangVersion>9</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="3.8.0" PrivateAssets="all" />
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.2" PrivateAssets="all" />
+    </ItemGroup>
+
+</Project>
+```
+
 
 A code generator reads attributes or other code elements using the Roslyn analysis APIs.
 From that information, it adds new code to the compilation.
@@ -46,6 +62,17 @@ Source generators can only add code; they aren't allowed to modify any existing 
 
 
 This section is broken down by user scenarios, with general solutions listed first, and more specific examples later on.
+
+Add generator to project:
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="..\Generators\Generators.csproj">
+      <OutputItemType>Analyzer</OutputItemType>
+      <ReferenceOutputAssembly>False</ReferenceOutputAssembly>
+  </ProjectReference>
+</ItemGroup>
+```
 
 ### Generated class
 
@@ -71,25 +98,34 @@ public partial class UserClass
 Create a generator that will create the missing type when run:
 
 ```csharp
-[Generator]
-public class CustomGenerator : ISourceGenerator
-{
-    public void Initialize(GeneratorInitializationContext context) {}
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 
-    public void Execute(GeneratorExecutionContext context)
-    {
-        context.AddSource("myGeneratedFile.cs", SourceText.From(@"
+namespace Generators
+{
+	[Generator]
+	public class CustomGenerator : ISourceGenerator
+	{
+		public void Initialize(GeneratorInitializationContext context)
+		{
+		}
+
+		public void Execute(GeneratorExecutionContext context)
+		{
+			context.AddSource("GeneratedClass.cs", SourceText.From(@"
 namespace GeneratedNamespace
 {
     public class GeneratedClass
     {
         public static void GeneratedMethod()
         {
-            // generated code
+            System.Console.WriteLine(""Hello, generated, World!"");
         }
     }
 }", Encoding.UTF8));
-    }
+		}
+	}
 }
 ```
 
@@ -361,6 +397,15 @@ public partial class UserClass : INotifyPropertyChanged
 - https://www.cazzulino.com/source-generators.html
 
 how to debug
+
+To see output files add to project:
+
+```xml
+<PropertyGroup>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)\GeneratedFiles</CompilerGeneratedFilesOutputPath>
+</PropertyGroup>
+```
 
 ## Unit Testing of Generators
 
