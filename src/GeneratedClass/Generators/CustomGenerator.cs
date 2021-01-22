@@ -13,14 +13,14 @@ namespace Generators
 
 		public void Execute(GeneratorExecutionContext context)
 		{
-			context.AddSource("myGeneratedFile.cs", SourceText.From(@"
+			context.AddSource("GeneratedClass.cs", SourceText.From(@"
 namespace GeneratedNamespace
 {
     public class GeneratedClass
     {
         public static void GeneratedMethod()
         {
-            // generated code
+            System.Console.WriteLine(""Hello, generated, World!"");
         }
     }
 }", Encoding.UTF8));

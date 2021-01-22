@@ -1,24 +1,20 @@
-﻿using System;
-
-namespace ConsoleApp
+﻿namespace ConsoleApp
 {
-    class Program
-    {
-        static void Main(string[] args)
-        {
-            Console.WriteLine("Hello World!");
+	class Program
+	{
+		static void Main(string[] args)
+		{
+			var userClass = new UserClass();
+			userClass.UserMethod();
+		}
+	}
 
-            var userClass = new UserClass();	
-            userClass.UserMethod();
-        }
-    }
-    
-    public partial class UserClass
-    {
-	    public void UserMethod()
-	    {
-		    // call into a generated method
-		    GeneratedNamespace.GeneratedClass.GeneratedMethod();
-	    }
-    }
+	public class UserClass
+	{
+		public void UserMethod()
+		{
+			// call into a generated method
+			GeneratedNamespace.GeneratedClass.GeneratedMethod();
+		}
+	}
 }
