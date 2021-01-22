@@ -138,28 +138,50 @@ namespace GeneratedNamespace
 **Example:**
 
 ```csharp
-[Generator]
-public class FileTransformGenerator : ISourceGenerator
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Xml.Linq;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
+
+namespace Generators
 {
-    public void Initialize(GeneratorInitializationContext context) {}
+	[Generator]
+	public class FileTransformGenerator : ISourceGenerator
+	{
+		public void Initialize(GeneratorInitializationContext context)
+		{
+		}
 
-    public void Execute(GeneratorExecutionContext context)
-    {
-        // find anything that matches our files
-        var myFiles = context.AnalyzerOptions.AdditionalFiles.Where(at => at.Path.EndsWith(".xml"));
-        foreach (var file in myFiles)
-        {
-            var content = file.GetText(context.CancellationToken);
+		public void Execute(GeneratorExecutionContext context)
+		{
+			var recordsXml = context.AdditionalFiles.SingleOrDefault(a => Path.GetFileName(a.Path) == "Records.xml");
+			if (recordsXml is null)
+			{
+				return;
+			}
 
-            // do some transforms based on the file context
-            string output = MyXmlToCSharpCompiler.Compile(content);
-
-            var sourceText = SourceText.From(output, Encoding.UTF8);
-
-            context.AddSource($"{file.Name}generated.cs", sourceText);
-        }
-    }
+			var records = XElement.Parse(recordsXml.GetText().ToString());
+			var names = records.Descendants("Record").Select(x => (string) x.Attribute("Name"));
+			foreach (var name in names)
+			{
+				context.AddSource($"{name}.cs", SourceText.From($@"
+namespace GeneratedNamespace
+{{
+    public record {name}();
+}}", Encoding.UTF8));
+			}
+		}
+	}
 }
+```
+
+Add to project:
+```xml
+<ItemGroup>
+    <AdditionalFiles Include="Files\Records.xml"/>
+</ItemGroup>
 ```
 
 ### Augment user code
