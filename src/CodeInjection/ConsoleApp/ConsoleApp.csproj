@@ -12,15 +12,10 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Generators\Generators.csproj">
-            <OutputItemType>Analyzer</OutputItemType>
-            <ReferenceOutputAssembly>False</ReferenceOutputAssembly>
-        </ProjectReference>
-    </ItemGroup>
-
-    <ItemGroup>
-        <AdditionalFiles Include="Files\NotValidFile.xml" />
-        <AdditionalFiles Include="Files\ValidFile.xml" />
+      <ProjectReference Include="..\Generators\Generators.csproj">
+          <OutputItemType>Analyzer</OutputItemType>
+          <ReferenceOutputAssembly>False</ReferenceOutputAssembly>
+      </ProjectReference>
     </ItemGroup>
 
 </Project>

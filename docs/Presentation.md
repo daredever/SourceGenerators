@@ -84,7 +84,7 @@ Add generator to project:
 
 Given the following user code:
 
-```csharp
+```c#
 static void Main(string[] args)
 {
     // call into a generated method
@@ -94,7 +94,7 @@ static void Main(string[] args)
 
 Create a generator that will create the missing type when run:
 
-```csharp
+```c#
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -126,121 +126,6 @@ namespace GeneratedNamespace
 }
 ```
 
-### Issue Diagnostics
-
-**User Scenario:** As a generator author I want to be able to add diagnostics to the users compilation.
-
-**Solution:** Diagnostics can be added to the compilation via `GeneratorExecutionContext.ReportDiagnostic()`. These can be in response to the content of the users compilation:
-for instance if the generator is expecting a well formed `AdditionalFile` but can not parse it, the generator could emit a warning notifying the user that generation can not proceed.
-
-For code-based issues, the generator author should also consider implementing a [diagnostic analyzer](https://docs.microsoft.com/en-us/visualstudio/code-quality/roslyn-analyzers-overview?view=vs-2019) that identifies the problem, and offers a code-fix to resolve it.
-
-**Example:**
-
-```csharp
-using System;
-using System.Linq;
-using System.Xml;
-using Microsoft.CodeAnalysis;
-
-namespace Generators
-{
-	[Generator]
-	public class MyXmlGenerator : ISourceGenerator
-	{
-		private static readonly DiagnosticDescriptor InvalidXmlWarning = new(
-			id: "MYXMLGEN001",
-			title: "Couldn't parse XML file",
-			messageFormat: "Couldn't parse XML file '{0}'",
-			category: "MyXmlGenerator",
-			defaultSeverity: DiagnosticSeverity.Warning,
-			isEnabledByDefault: true);
-
-		public void Initialize(GeneratorInitializationContext context)
-		{
-		}
-
-		public void Execute(GeneratorExecutionContext context)
-		{
-			var xmlFiles = context.AdditionalFiles
-				.Where(at => at.Path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase));
-			foreach (var xmlFile in xmlFiles)
-			{
-				var text = xmlFile.GetText(context.CancellationToken).ToString();
-				var xmlDoc = new XmlDocument();
-				try
-				{
-					xmlDoc.LoadXml(text);
-				}
-				catch (XmlException)
-				{
-					// issue warning MYXMLGEN001: Couldn't parse XML file '<path>'
-					context.ReportDiagnostic(Diagnostic.Create(InvalidXmlWarning, Location.None, xmlFile.Path));
-					continue;
-				}
-
-				// continue generation...
-			}
-		}
-	}
-}
-```
-
-### Additional file transformation
-
-**User scenario:** As a generator author I want to be able to transform an external non-C# file into an equivalent C# representation.
-
-**Solution:** Use the additional files property of the `GeneratorExecutionContext` to retrieve the contents of the file, convert it to the C# representation and return it.
-
-**Example:**
-
-```csharp
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Xml.Linq;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
-
-namespace Generators
-{
-	[Generator]
-	public class FileTransformGenerator : ISourceGenerator
-	{
-		public void Initialize(GeneratorInitializationContext context)
-		{
-		}
-
-		public void Execute(GeneratorExecutionContext context)
-		{
-			var recordsXml = context.AdditionalFiles.SingleOrDefault(a => Path.GetFileName(a.Path) == "Records.xml");
-			if (recordsXml is null)
-			{
-				return;
-			}
-
-			var records = XElement.Parse(recordsXml.GetText().ToString());
-			var names = records.Descendants("Record").Select(x => (string) x.Attribute("Name"));
-			foreach (var name in names)
-			{
-				context.AddSource($"{name}.cs", SourceText.From($@"
-namespace GeneratedNamespace
-{{
-    public record {name}();
-}}", Encoding.UTF8));
-			}
-		}
-	}
-}
-```
-
-Add to project:
-```xml
-<ItemGroup>
-    <AdditionalFiles Include="Files\Records.xml"/>
-</ItemGroup>
-```
-
 ### Augment user code
 
 **User scenario:** As a generator author I want to be able to inspect and augment a user's code with new functionality.
@@ -252,7 +137,7 @@ contains the additional functionality.
 
 **Example:**
 
-```csharp
+```c#
 public partial class UserClass
 {
     public void UserMethod()
@@ -263,7 +148,7 @@ public partial class UserClass
 }
 ```
 
-```csharp
+```c#
 [Generator]
 public class AugmentingGenerator : ISourceGenerator
 {
@@ -347,13 +232,83 @@ public class MyGenerator : ISourceGenerator
 }
 ```
 
+### Additional file transformation
+
+**User scenario:**
+As a generator author I want to be able to transform an external non-C# file into an equivalent C# representation.
+As a generator author I want to be able to add diagnostics to the users compilation.
+
+**Solution:**
+Use the additional files property of the `GeneratorExecutionContext` to retrieve the contents of the file, convert it to the C# representation and return it.
+
+Diagnostics can be added to the compilation via `GeneratorExecutionContext.ReportDiagnostic()`. These can be in response to the content of the users compilation:
+for instance if the generator is expecting a well formed `AdditionalFile` but can not parse it, the generator could emit a warning notifying the user that generation can not proceed.
+
+For code-based issues, the generator author should also consider implementing a [diagnostic analyzer](https://docs.microsoft.com/en-us/visualstudio/code-quality/roslyn-analyzers-overview?view=vs-2019) that identifies the problem, and offers a code-fix to resolve it.
+
+**Example:**
+
+```c#
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Xml.Linq;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
+
+namespace Generators
+{
+	[Generator]
+	public class FileTransformGenerator : ISourceGenerator
+	{
+		private static readonly DiagnosticDescriptor Warning = new(
+			id: "FTGEN001",
+			title: "Could find XML file",
+			messageFormat: "Could find XML file '{0}'",
+			category: "FileTransformGenerator",
+			defaultSeverity: DiagnosticSeverity.Error,
+			isEnabledByDefault: true);
+		
+		public void Initialize(GeneratorInitializationContext context)
+		{
+		}
+
+		public void Execute(GeneratorExecutionContext context)
+		{
+			var recordsXml = context.AdditionalFiles.SingleOrDefault(a => Path.GetFileName(a.Path) == "Records.xml");
+			if (recordsXml is null)
+			{
+				context.ReportDiagnostic(Diagnostic.Create(Warning, Location.None, "Records.xml"));
+				return;
+			}
+
+			var records = XElement.Parse(recordsXml.GetText(context.CancellationToken).ToString());
+			var names = records.Descendants("Record").Select(x => (string) x.Attribute("Name"));
+			foreach (var name in names)
+			{
+				context.AddSource($"{name}.cs", SourceText.From($@"
+namespace Records
+{{
+    public record {name}();
+}}", Encoding.UTF8));
+			}
+		}
+	}
+}
+```
+
+Add to project:
+```xml
+<ItemGroup>
+    <AdditionalFiles Include="Files\Records.xml"/>
+</ItemGroup>
+```
+
 ## Debugging
 
 - https://nicksnettravels.builttoroam.com/debug-code-gen/
 - https://dominikjeske.github.io/source-generators/
 - https://www.cazzulino.com/source-generators.html
-
-how to debug
 
 To see output files add to project:
 
@@ -378,7 +333,7 @@ Debugger.Launch();
 
 Starting with a basic generator that adds a single source file:
 
-```csharp
+```c#
 [Generator]
 public class CustomGenerator : ISourceGenerator
 {
@@ -403,7 +358,7 @@ namespace GeneratedNamespace
 
 As a user, we can host it in a unit test like so:
 
-```csharp
+```c#
 using System.Linq;
 using System.Reflection;
 using Microsoft.CodeAnalysis;
@@ -482,29 +437,63 @@ Ensure the generator is placed in the `analyzers\dotnet\cs` folder of the packag
 For example, to turn your generator project into a NuGet package at build, add the following to your project file:
 
 ```xml
-  <PropertyGroup>
+<PropertyGroup>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild> <!-- Generates a package at build -->
     <IncludeBuildOutput>false</IncludeBuildOutput> <!-- Do not include the generator as a lib dependency -->
-  </PropertyGroup>
+</PropertyGroup>
 
-  <ItemGroup>
+<ItemGroup>
     <!-- Package the generator in the analyzer directory of the nuget package -->
     <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-  </ItemGroup>
+</ItemGroup>
 ```
 
-## Possible security and other problems
+## Possible security problems
+
+- https://docs.microsoft.com/en-us/dotnet/api/system.runtime.compilerservices.moduleinitializerattribute?view=net-5.0
+- https://khalidabuhakmeh.com/module-initializers-in-csharp-9
 
 "Perhaps the existing third-party tooling for “injecting” module initializers is sufficient for users who have been asking for this feature."
 
 ```c#
-const string moduleInitSource = @"
-static class HackHack
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
+
+namespace Generators
+{
+	[Generator]
+	public class CustomGenerator : ISourceGenerator
+	{
+		public void Initialize(GeneratorInitializationContext context)
+		{
+		}
+
+		public void Execute(GeneratorExecutionContext context)
+		{
+			context.AddSource("GeneratedClass.cs", SourceText.From(@"
+namespace GeneratedNamespace
+{
+    public class GeneratedClass
+    {
+        public static void GeneratedMethod()
+        {
+            System.Console.WriteLine(""Hello, generated, World!"");
+        }
+    }
+}", Encoding.UTF8));
+			
+			// code injection
+			const string sourceForInjection = @"
+static class Attack
 {
   [System.Runtime.CompilerServices.ModuleInitializer]
-  public static void ModuleInit() => System.Console.WriteLine(""Knock knock Neo!\r\nAll your sources are belong to us!\r\n"");
+  public static void Init() => System.Console.WriteLine(""There is a code injection"");
 }";
-context.AddSource("hack.cs", moduleInitSource);
+			context.AddSource("Attack.cs", sourceForInjection);
+		}
+	}
+}
 ```
 
 ## References
