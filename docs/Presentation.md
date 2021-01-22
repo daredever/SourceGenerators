@@ -128,12 +128,24 @@ namespace GeneratedNamespace
 
 ### Augment user code
 
+- https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/classes-and-structs/partial-classes-and-methods
+- https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/extending-partial-methods
+- https://www.infoq.com/news/2020/06/CSharp-9-Partial-Methods/
+
 **User scenario:** As a generator author I want to be able to inspect and augment a user's code with new functionality.
 
 **Solution:** Require the user to make the class you want to augment be a `partial class`, and mark it with e.g. a unique attribute, or name.
 Register a `SyntaxReceiver` that looks for any classes marked for generation and records them. Retrieve the populated `SyntaxReceiver`
 during the generation phase and use the recorded information to generate a matching `partial class` that
 contains the additional functionality.
+
+There are some changes to partial methods. Before C# 9.0, partial methods are private but can't specify an access modifier,
+have a void return, and can't have out parameters. These restrictions meant that if no method implementation is provided,
+the compiler removes all calls to the partial method. C# 9.0 removes these restrictions,
+but requires that partial method declarations have an implementation.
+Code generators can provide that implementation. To avoid introducing a breaking change,
+the compiler considers any partial method without an access modifier to follow the old rules.
+If the partial method includes the private access modifier, the new rules govern that partial method.
 
 **Example:**
 
@@ -145,90 +157,80 @@ public partial class UserClass
         // call into a generated method inside the class
         this.GeneratedMethod();
     }
+    
+    // The declaration of partial method
+    public partial void PartialUserMethod(string message);		
+    
+    // The declaration of partial method
+    public partial string PartialUserMethodWithResult(string message);
 }
 ```
 
 ```c#
-[Generator]
-public class AugmentingGenerator : ISourceGenerator
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
+
+namespace Generators
 {
-    public void Initialize(GeneratorInitializationContext context)
-    {
-        // Register a factory that can create our custom syntax receiver
-        context.RegisterForSyntaxNotifications(() => new MySyntaxReceiver());
-    }
+	[Generator]
+	public class AugmentingGenerator : ISourceGenerator
+	{
+		public void Initialize(GeneratorInitializationContext context)
+		{
+			// Register a factory that can create our custom syntax receiver
+			context.RegisterForSyntaxNotifications(() => new MySyntaxReceiver());
+		}
 
-    public void Execute(GeneratorExecutionContext context)
-    {
-        // the generator infrastructure will create a receiver and populate it
-        // we can retrieve the populated instance via the context
-        MySyntaxReceiver syntaxReceiver = (MySyntaxReceiver)context.SyntaxReceiver;
+		public void Execute(GeneratorExecutionContext context)
+		{
+			// the generator infrastructure will create a receiver and populate it
+			// we can retrieve the populated instance via the context
+			var syntaxReceiver = (MySyntaxReceiver)context.SyntaxReceiver;
 
-        // get the recorded user class
-        ClassDeclarationSyntax userClass = syntaxReceiver.ClassToAugment;
-        if (userClass is null)
-        {
-            // if we didn't find the user class, there is nothing to do
-            return;
-        }
+			// get the recorded user class
+			var userClass = syntaxReceiver.ClassToAugment;
+			if (userClass is null)
+			{
+				// if we didn't find the user class, there is nothing to do
+				return;
+			}
 
-        // add the generated implementation to the compilation
-        SourceText sourceText = SourceText.From($@"
-public partial class {userClass.Identifier}
+			// add the generated implementation to the compilation
+			var sourceText = SourceText.From($@"
+namespace ConsoleApp
 {{
-    private void GeneratedMethod()
-    {{
-        // generated code
-    }}
+	public partial class {userClass.Identifier}
+	{{
+	    private void GeneratedMethod()
+	    {{
+	        // generated code
+	    }}
+
+	    public partial void PartialUserMethod(string message) => System.Console.WriteLine(message);
+	    
+	    public partial string PartialUserMethodWithResult(string message) => message;
+	}}
 }}", Encoding.UTF8);
-        context.AddSource("UserClass.Generated.cs", sourceText);
-    }
+			context.AddSource("UserClass.Generated.cs", sourceText);
+		}
 
-    class MySyntaxReceiver : ISyntaxReceiver
-    {
-        public ClassDeclarationSyntax ClassToAugment { get; private set; }
+		class MySyntaxReceiver : ISyntaxReceiver
+		{
+			public ClassDeclarationSyntax ClassToAugment { get; private set; }
 
-        public void OnVisitSyntaxNode(SyntaxNode syntaxNode)
-        {
-            // Business logic to decide what we're interested in goes here
-            if (syntaxNode is ClassDeclarationSyntax cds &&
-                cds.Identifier.ValueText == "UserClass")
-            {
-                ClassToAugment = cds;
-            }
-        }
-    }
-}
-```
-
-### Partial methods
-
-- https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/classes-and-structs/partial-classes-and-methods
-- https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/extending-partial-methods
-- https://www.infoq.com/news/2020/06/CSharp-9-Partial-Methods/
-
-
-There are some changes to partial methods. Before C# 9.0, partial methods are private but can't specify an access modifier,
-have a void return, and can't have out parameters. These restrictions meant that if no method implementation is provided,
-the compiler removes all calls to the partial method. C# 9.0 removes these restrictions,
-but requires that partial method declarations have an implementation.
-Code generators can provide that implementation. To avoid introducing a breaking change,
-the compiler considers any partial method without an access modifier to follow the old rules.
-If the partial method includes the private access modifier, the new rules govern that partial method.
-
-
-```c#
-// тут пример генератора для partial method
-[Generator]
-public class MyGenerator : ISourceGenerator
-{
-    public void Initialize(GeneratorInitializationContext context)
-    {
-    }
-
-    public void Execute(GeneratorExecutionContext context)
-    {
-    }
+			public void OnVisitSyntaxNode(SyntaxNode syntaxNode)
+			{
+				// Business logic to decide what we're interested in goes here
+				if (syntaxNode is ClassDeclarationSyntax cds &&
+				    cds.Identifier.ValueText == "UserClass")
+				{
+					ClassToAugment = cds;
+				}
+			}
+		}
+	}
 }
 ```
 
