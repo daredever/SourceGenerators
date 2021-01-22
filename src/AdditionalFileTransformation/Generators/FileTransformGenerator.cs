@@ -22,12 +22,12 @@ namespace Generators
 				return;
 			}
 
-			var records = XElement.Parse(recordsXml.GetText().ToString());
+			var records = XElement.Parse(recordsXml.GetText(context.CancellationToken).ToString());
 			var names = records.Descendants("Record").Select(x => (string) x.Attribute("Name"));
 			foreach (var name in names)
 			{
 				context.AddSource($"{name}.cs", SourceText.From($@"
-namespace GeneratedNamespace
+namespace Records
 {{
     public record {name}();
 }}", Encoding.UTF8));

@@ -85,13 +85,10 @@ Add generator to project:
 Given the following user code:
 
 ```csharp
-public partial class UserClass
+static void Main(string[] args)
 {
-    public void UserMethod()
-    {
-        // call into a generated method
-        GeneratedNamespace.GeneratedClass.GeneratedMethod();
-    }
+    // call into a generated method
+    GeneratedNamespace.GeneratedClass.GeneratedMethod();
 }
 ```
 
@@ -124,6 +121,66 @@ namespace GeneratedNamespace
         }
     }
 }", Encoding.UTF8));
+		}
+	}
+}
+```
+
+### Issue Diagnostics
+
+**User Scenario:** As a generator author I want to be able to add diagnostics to the users compilation.
+
+**Solution:** Diagnostics can be added to the compilation via `GeneratorExecutionContext.ReportDiagnostic()`. These can be in response to the content of the users compilation:
+for instance if the generator is expecting a well formed `AdditionalFile` but can not parse it, the generator could emit a warning notifying the user that generation can not proceed.
+
+For code-based issues, the generator author should also consider implementing a [diagnostic analyzer](https://docs.microsoft.com/en-us/visualstudio/code-quality/roslyn-analyzers-overview?view=vs-2019) that identifies the problem, and offers a code-fix to resolve it.
+
+**Example:**
+
+```csharp
+using System;
+using System.Linq;
+using System.Xml;
+using Microsoft.CodeAnalysis;
+
+namespace Generators
+{
+	[Generator]
+	public class MyXmlGenerator : ISourceGenerator
+	{
+		private static readonly DiagnosticDescriptor InvalidXmlWarning = new(
+			id: "MYXMLGEN001",
+			title: "Couldn't parse XML file",
+			messageFormat: "Couldn't parse XML file '{0}'",
+			category: "MyXmlGenerator",
+			defaultSeverity: DiagnosticSeverity.Warning,
+			isEnabledByDefault: true);
+
+		public void Initialize(GeneratorInitializationContext context)
+		{
+		}
+
+		public void Execute(GeneratorExecutionContext context)
+		{
+			var xmlFiles = context.AdditionalFiles
+				.Where(at => at.Path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase));
+			foreach (var xmlFile in xmlFiles)
+			{
+				var text = xmlFile.GetText(context.CancellationToken).ToString();
+				var xmlDoc = new XmlDocument();
+				try
+				{
+					xmlDoc.LoadXml(text);
+				}
+				catch (XmlException)
+				{
+					// issue warning MYXMLGEN001: Couldn't parse XML file '<path>'
+					context.ReportDiagnostic(Diagnostic.Create(InvalidXmlWarning, Location.None, xmlFile.Path));
+					continue;
+				}
+
+				// continue generation...
+			}
 		}
 	}
 }
@@ -290,128 +347,6 @@ public class MyGenerator : ISourceGenerator
 }
 ```
 
-### Issue Diagnostics
-
-**User Scenario:** As a generator author I want to be able to add diagnostics to the users compilation.
-
-**Solution:** Diagnostics can be added to the compilation via `GeneratorExecutionContext.ReportDiagnostic()`. These can be in response to the content of the users compilation:
-for instance if the generator is expecting a well formed `AdditionalFile` but can not parse it, the generator could emit a warning notifying the user that generation can not proceed.
-
-For code-based issues, the generator author should also consider implementing a [diagnostic analyzer](https://docs.microsoft.com/en-us/visualstudio/code-quality/roslyn-analyzers-overview?view=vs-2019) that identifies the problem, and offers a code-fix to resolve it.
-
-**Example:**
-
-```csharp
-[Generator]
-public class MyXmlGenerator : ISourceGenerator
-{
-
-    private static readonly DiagnosticDescriptor InvalidXmlWarning = new DiagnosticDescriptor(id: "MYXMLGEN001",
-                                                                                              title: "Couldn't parse XML file",
-                                                                                              messageFormat: "Couldn't parse XML file '{0}'.",
-                                                                                              category: "MyXmlGenerator",
-                                                                                              DiagnosticSeverity.Warning,
-                                                                                              isEnabledByDefault: true);
-
-    public void Execute(GeneratorExecutionContext context)
-    {
-        // Using the context, get any additional files that end in .xml
-        IEnumerable<AdditionalText> xmlFiles = context.AdditionalFiles.Where(at => at.Path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase));
-        foreach (AdditionalText xmlFile in xmlFiles)
-        {
-            XmlDocument xmlDoc = new XmlDocument();
-            string text = xmlFile.GetText(context.CancellationToken).ToString();
-            try
-            {
-                xmlDoc.LoadXml(text);
-            }
-            catch (XmlException)
-            {
-                // issue warning MYXMLGEN001: Couldn't parse XML file '<path>'
-                context.ReportDiagnostic(Diagnostic.Create(InvalidXmlWarning, Location.None, xmlFile.Path));
-                continue;
-            }
-
-            // continue generation...
-        }
-    }
-
-    public void Initialize(GeneratorInitializationContext context)
-    {
-    }
-}
-```
-
-### INotifyPropertyChanged
-
-**User scenario:** As a generator author I want to be able to implement the `INotifyPropertyChanged` pattern automatically for a user.
-
-**Solution:** The design tenant 'Explicitly additive only' seems to be at direct odds with the ability to implement this, and appears to call for user code modification.
-However we can instead take advantage of explicit fields and instead of *editing* the users properties, directly provide them for listed fields.
-
-**Example:**
-
-Given a user class such as:
-
-```csharp
-using AutoNotify;
-
-public partial class UserClass
-{
-    [AutoNotify]
-    private bool _boolProp;
-
-    [AutoNotify(PropertyName = "Count")]
-    private int _intProp;
-}
-```
-
-A generator could produce the following:
-
-```csharp
-using System;
-using System.ComponentModel;
-
-namespace AutoNotify
-{
-    [AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = false)]
-    sealed class AutoNotifyAttribute : Attribute
-    {
-        public AutoNotifyAttribute()
-        {
-        }
-        public string PropertyName { get; set; }
-    }
-}
-
-
-public partial class UserClass : INotifyPropertyChanged
-{
-    public bool BoolProp
-    {
-        get => _boolProp;
-        set
-        {
-            _boolProp = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("UserBool"));
-        }
-    }
-
-    public int Count
-    {
-        get => _intProp;
-        set
-        {
-            _intProp = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Count"));
-        }
-    }
-
-    public event PropertyChangedEventHandler PropertyChanged;
-}
-
-```
-
 ## Debugging
 
 - https://nicksnettravels.builttoroam.com/debug-code-gen/
@@ -427,6 +362,12 @@ To see output files add to project:
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
     <CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)\GeneratedFiles</CompilerGeneratedFilesOutputPath>
 </PropertyGroup>
+```
+
+Add to generator's code:
+
+```c#
+Debugger.Launch();
 ```
 
 ## Unit Testing of Generators
@@ -558,4 +499,18 @@ For example, to turn your generator project into a NuGet package at build, add t
 
 ## Possible security and other problems
 
-- "Perhaps the existing third-party tooling for “injecting” module initializers is sufficient for users who have been asking for this feature."
+"Perhaps the existing third-party tooling for “injecting” module initializers is sufficient for users who have been asking for this feature."
+
+```c#
+const string moduleInitSource = @"
+static class HackHack
+{
+  [System.Runtime.CompilerServices.ModuleInitializer]
+  public static void ModuleInit() => System.Console.WriteLine(""Knock knock Neo!\r\nAll your sources are belong to us!\r\n"");
+}";
+context.AddSource("hack.cs", moduleInitSource);
+```
+
+## References
+
+all the references from presentation
