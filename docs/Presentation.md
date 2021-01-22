@@ -468,6 +468,8 @@ Note: the above example uses MSTest, but the contents of the test are easily ada
 
 ## Package a generator as a NuGet package
 
+- https://roslyn-analyzers.readthedocs.io/en/latest/create-nuget-package.html
+
 **User scenario**: As a generator author I want to package my generator as a NuGet package for consumption.
 
 **Solution:** Generators can be packaged using the same method as an Analyzer would.
