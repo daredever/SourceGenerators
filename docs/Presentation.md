@@ -299,6 +299,15 @@ namespace Records
 }
 ```
 
+Add file:
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<Records>
+    <Record Name = "User"/>
+    <Record Name = "Person"/>
+</Records>
+```
+
 Add to project:
 ```xml
 <ItemGroup>
