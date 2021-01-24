@@ -330,6 +330,9 @@ To see output files add to project:
 </PropertyGroup>
 ```
 
+BreakPoints:
+![Bebug](debug.png)
+
 Add to generator's code:
 
 ```c#
