@@ -330,10 +330,12 @@ To see output files add to project:
 </PropertyGroup>
 ```
 
-BreakPoints:
-![Bebug](debug.png)
+Add breakpoint to generated code:
+![Debug](debug.png)
 
 Add to generator's code:
+
+![Debug generator](debug-generator.png)
 
 ```c#
 Debugger.Launch();
