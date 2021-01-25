@@ -30,6 +30,11 @@ namespace Generators
 				return;
 			}
 
+			AddSource(context, xmlData);
+		}
+
+		private static void AddSource(GeneratorExecutionContext context, string xmlData)
+		{
 			var generatedSource = GenerateSource(xmlData);
 			context.AddSource("DirectoryOfCountries.Generated.cs", SourceText.From(generatedSource, Encoding.UTF8));
 
