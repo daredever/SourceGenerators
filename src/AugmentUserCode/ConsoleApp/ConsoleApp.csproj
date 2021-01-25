@@ -17,5 +17,9 @@
           <ReferenceOutputAssembly>False</ReferenceOutputAssembly>
       </ProjectReference>
     </ItemGroup>
+    
+    <ItemGroup>
+        <AdditionalFiles Include="Files\Countries.xml"/>
+    </ItemGroup>
 
 </Project>
