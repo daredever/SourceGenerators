@@ -74,7 +74,7 @@ Add generator to project:
 </ItemGroup>
 ```
 
-### Generated class
+### Hello world
 
 **User scenario:** As a generator author I want to be able to add a type to the compilation, that can be referenced by the user's code.
 
@@ -126,18 +126,29 @@ namespace GeneratedNamespace
 }
 ```
 
-### Augment user code
+### Advanced
 
 - https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/classes-and-structs/partial-classes-and-methods
 - https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/extending-partial-methods
 - https://www.infoq.com/news/2020/06/CSharp-9-Partial-Methods/
 
-**User scenario:** As a generator author I want to be able to inspect and augment a user's code with new functionality.
+**User scenario:**
+As a generator author I want to be able to inspect and augment a user's code with new functionality.
+As a generator author I want to be able to transform an external non-C# file into an equivalent C# representation.
+As a generator author I want to be able to add diagnostics to the users compilation.
 
-**Solution:** Require the user to make the class you want to augment be a `partial class`, and mark it with e.g. a unique attribute, or name.
+**Solution:** 
+Require the user to make the class you want to augment be a `partial class`, and mark it with e.g. a unique attribute, or name.
 Register a `SyntaxReceiver` that looks for any classes marked for generation and records them. Retrieve the populated `SyntaxReceiver`
 during the generation phase and use the recorded information to generate a matching `partial class` that
 contains the additional functionality.
+
+Use the additional files property of the `GeneratorExecutionContext` to retrieve the contents of the file, convert it to the C# representation and return it.
+
+Diagnostics can be added to the compilation via `GeneratorExecutionContext.ReportDiagnostic()`. These can be in response to the content of the users compilation:
+for instance if the generator is expecting a well formed `AdditionalFile` but can not parse it, the generator could emit a warning notifying the user that generation can not proceed.
+
+For code-based issues, the generator author should also consider implementing a [diagnostic analyzer](https://docs.microsoft.com/en-us/visualstudio/code-quality/roslyn-analyzers-overview?view=vs-2019) that identifies the problem, and offers a code-fix to resolve it.
 
 There are some changes to partial methods. Before C# 9.0, partial methods are private but can't specify an access modifier,
 have a void return, and can't have out parameters. These restrictions meant that if no method implementation is provided,
@@ -147,173 +158,142 @@ Code generators can provide that implementation. To avoid introducing a breaking
 the compiler considers any partial method without an access modifier to follow the old rules.
 If the partial method includes the private access modifier, the new rules govern that partial method.
 
-**Example:**
-
-```c#
-public partial class UserClass
-{
-    public void UserMethod()
-    {
-        // call into a generated method inside the class
-        this.GeneratedMethod();
-    }
-    
-    // The declaration of partial method
-    public partial void PartialUserMethod(string message);		
-    
-    // The declaration of partial method
-    public partial string PartialUserMethodWithResult(string message);
-}
-```
-
-```c#
-using System.Text;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Text;
-
-namespace Generators
-{
-	[Generator]
-	public class AugmentingGenerator : ISourceGenerator
-	{
-		public void Initialize(GeneratorInitializationContext context)
-		{
-			// Register a factory that can create our custom syntax receiver
-			context.RegisterForSyntaxNotifications(() => new MySyntaxReceiver());
-		}
-
-		public void Execute(GeneratorExecutionContext context)
-		{
-			// the generator infrastructure will create a receiver and populate it
-			// we can retrieve the populated instance via the context
-			var syntaxReceiver = (MySyntaxReceiver)context.SyntaxReceiver;
-
-			// get the recorded user class
-			var userClass = syntaxReceiver.ClassToAugment;
-			if (userClass is null)
-			{
-				// if we didn't find the user class, there is nothing to do
-				return;
-			}
-
-			// add the generated implementation to the compilation
-			var sourceText = SourceText.From($@"
-namespace ConsoleApp
-{{
-	public partial class {userClass.Identifier}
-	{{
-	    private void GeneratedMethod()
-	    {{
-	        // generated code
-	    }}
-
-	    public partial void PartialUserMethod(string message) => System.Console.WriteLine(message);
-	    
-	    public partial string PartialUserMethodWithResult(string message) => message;
-	}}
-}}", Encoding.UTF8);
-			context.AddSource("UserClass.Generated.cs", sourceText);
-		}
-
-		class MySyntaxReceiver : ISyntaxReceiver
-		{
-			public ClassDeclarationSyntax ClassToAugment { get; private set; }
-
-			public void OnVisitSyntaxNode(SyntaxNode syntaxNode)
-			{
-				// Business logic to decide what we're interested in goes here
-				if (syntaxNode is ClassDeclarationSyntax cds &&
-				    cds.Identifier.ValueText == "UserClass")
-				{
-					ClassToAugment = cds;
-				}
-			}
-		}
-	}
-}
-```
-
-### Additional file transformation
-
-**User scenario:**
-As a generator author I want to be able to transform an external non-C# file into an equivalent C# representation.
-As a generator author I want to be able to add diagnostics to the users compilation.
-
-**Solution:**
-Use the additional files property of the `GeneratorExecutionContext` to retrieve the contents of the file, convert it to the C# representation and return it.
-
-Diagnostics can be added to the compilation via `GeneratorExecutionContext.ReportDiagnostic()`. These can be in response to the content of the users compilation:
-for instance if the generator is expecting a well formed `AdditionalFile` but can not parse it, the generator could emit a warning notifying the user that generation can not proceed.
-
-For code-based issues, the generator author should also consider implementing a [diagnostic analyzer](https://docs.microsoft.com/en-us/visualstudio/code-quality/roslyn-analyzers-overview?view=vs-2019) that identifies the problem, and offers a code-fix to resolve it.
-
-**Example:**
-
-```c#
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Xml.Linq;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
-
-namespace Generators
-{
-	[Generator]
-	public class FileTransformGenerator : ISourceGenerator
-	{
-		private static readonly DiagnosticDescriptor Warning = new(
-			id: "FTGEN001",
-			title: "Could find XML file",
-			messageFormat: "Could find XML file '{0}'",
-			category: "FileTransformGenerator",
-			defaultSeverity: DiagnosticSeverity.Error,
-			isEnabledByDefault: true);
-		
-		public void Initialize(GeneratorInitializationContext context)
-		{
-		}
-
-		public void Execute(GeneratorExecutionContext context)
-		{
-			var recordsXml = context.AdditionalFiles.SingleOrDefault(a => Path.GetFileName(a.Path) == "Records.xml");
-			if (recordsXml is null)
-			{
-				context.ReportDiagnostic(Diagnostic.Create(Warning, Location.None, "Records.xml"));
-				return;
-			}
-
-			var records = XElement.Parse(recordsXml.GetText(context.CancellationToken).ToString());
-			var names = records.Descendants("Record").Select(x => (string) x.Attribute("Name"));
-			foreach (var name in names)
-			{
-				context.AddSource($"{name}.cs", SourceText.From($@"
-namespace Records
-{{
-    public record {name}();
-}}", Encoding.UTF8));
-			}
-		}
-	}
-}
-```
-
 Add file:
 ```xml
-<?xml version="1.0" encoding="utf-8"?>
-<Records>
-    <Record Name = "User"/>
-    <Record Name = "Person"/>
-</Records>
+<?xml version="1.0" encoding="UTF-8" ?>
+<country-list>
+    <country>
+        <name>Россия</name>
+        <fullname>Российская Федерация</fullname>
+        <english>Russian Federation</english>
+        <alpha2>RU</alpha2>
+        <alpha3>RUS</alpha3>
+        <iso>643</iso>
+        <location>Европа</location>
+        <location-precise>Восточная Европа</location-precise>
+    </country>
+</country-list>
 ```
 
 Add to project:
 ```xml
 <ItemGroup>
-    <AdditionalFiles Include="Files\Records.xml"/>
+    <AdditionalFiles Include="Files\Countries.xml"/>
 </ItemGroup>
 ```
+
+**Example:**
+
+```c#
+public partial class DirectoryOfCountries
+{
+    public static partial IReadOnlyList<Country> Europe();
+}
+```
+
+```c#
+[Generator]
+public partial class AugmentingGenerator : ISourceGenerator
+{
+    private class CustomSyntaxReceiver : ISyntaxReceiver
+    {
+        public ClassDeclarationSyntax ClassToAugment { get; private set; }
+
+        public void OnVisitSyntaxNode(SyntaxNode syntaxNode)
+        {
+            // Business logic to decide what we're interested in goes here
+            if (syntaxNode is ClassDeclarationSyntax cds && cds.Identifier.ValueText == "DirectoryOfCountries")
+            {
+                ClassToAugment = cds;
+            }
+        }
+    }
+}
+
+public partial class AugmentingGenerator
+{
+    public void Initialize(GeneratorInitializationContext context)
+    {
+        // Register a factory that can create our custom syntax receiver
+        context.RegisterForSyntaxNotifications(() => new CustomSyntaxReceiver());
+    }
+}
+
+public partial class AugmentingGenerator
+{
+    public void Execute(GeneratorExecutionContext context)
+    {
+        // the generator infrastructure will create a receiver and populate it
+        // we can retrieve the populated instance via the context
+        var directoryOfCountriesClass = ((CustomSyntaxReceiver) context.SyntaxReceiver).ClassToAugment;
+        if (directoryOfCountriesClass is null)
+        {
+            return;
+        }
+
+        // get data from project
+        var xmlData = context.AdditionalFiles
+            .SingleOrDefault(a => Path.GetFileName(a.Path) == "Countries.xml")
+            ?.GetText(context.CancellationToken)
+            ?.ToString();
+        if (xmlData is null)
+        {
+            ReportDiagnostic(context);
+            return;
+        }
+
+        var generatedSource = GenerateSource(xmlData);
+        context.AddSource("DirectoryOfCountries.Generated.cs", SourceText.From(generatedSource, Encoding.UTF8));
+
+        var countrySource = "namespace Countries{ public record Country (string Name, string Code); }";
+        context.AddSource("Country.cs", SourceText.From(countrySource, Encoding.UTF8));
+    }
+
+    private static void ReportDiagnostic(GeneratorExecutionContext context)
+    {
+        var error = new DiagnosticDescriptor(
+            id: "AGEN001",
+            title: "Could find XML file",
+            messageFormat: "Could find XML file '{0}'",
+            category: "FileTransformGenerator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        context.ReportDiagnostic(Diagnostic.Create(error, Location.None, "Countries.xml"));
+    }
+
+    private static string GenerateSource(string countriesXml)
+    {
+        var countries = XElement.Parse(countriesXml)
+            .Descendants("country")
+            .Select(x => new
+            {
+                Name = x.Element("name")?.Value,
+                Code = x.Element("alpha2")?.Value,
+                Location = x.Element("location")?.Value,
+            });
+
+        var sb = new StringBuilder();
+        sb.AppendLine("using System.Collections.Generic; namespace Countries {");
+        sb.AppendLine("public partial class DirectoryOfCountries {");
+        sb.AppendLine("private static List<Country> _europe = new List<Country> {");
+        foreach (var country in countries.Where(c => c.Location == "Европа"))
+        {
+            sb.Append($"new Country (\"{country.Name}\", \"{country.Code}\"),");
+        }
+
+        sb.AppendLine("};");
+        sb.AppendLine("public static partial IReadOnlyList<Country> Europe() => _europe; }}");
+
+        return sb.ToString();
+    }
+}
+
+```
+
+
+
+
 
 ## Debugging
 
@@ -331,6 +311,7 @@ To see output files add to project:
 ```
 
 Add breakpoint to generated code:
+
 ![Debug](debug.png)
 
 Add to generator's code:
@@ -464,53 +445,17 @@ For example, to turn your generator project into a NuGet package at build, add t
 </ItemGroup>
 ```
 
-## Possible security problems
+## Problems
 
 - https://docs.microsoft.com/en-us/dotnet/api/system.runtime.compilerservices.moduleinitializerattribute?view=net-5.0
 - https://khalidabuhakmeh.com/module-initializers-in-csharp-9
 
 "Perhaps the existing third-party tooling for “injecting” module initializers is sufficient for users who have been asking for this feature."
 
-```c#
-using System.Text;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
-
-namespace Generators
-{
-	[Generator]
-	public class CustomGenerator : ISourceGenerator
-	{
-		public void Initialize(GeneratorInitializationContext context)
-		{
-		}
-
-		public void Execute(GeneratorExecutionContext context)
-		{
-			context.AddSource("GeneratedClass.cs", SourceText.From(@"
-namespace GeneratedNamespace
-{
-    public class GeneratedClass
-    {
-        public static void GeneratedMethod()
-        {
-            System.Console.WriteLine(""Hello, generated, World!"");
-        }
-    }
-}", Encoding.UTF8));
-			
-			// code injection
-			const string sourceForInjection = @"
-static class Attack
-{
-  [System.Runtime.CompilerServices.ModuleInitializer]
-  public static void Init() => System.Console.WriteLine(""There is a code injection"");
-}";
-			context.AddSource("Attack.cs", sourceForInjection);
-		}
-	}
-}
-```
+- Not easy to work with Roslyn code model (AST)
+- Performance affects compilation time
+- Silent work and IDE support needed
+- Security of third-party nuget packages
 
 ## References
 
